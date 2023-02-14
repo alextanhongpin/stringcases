@@ -85,6 +85,9 @@ func TestStringCaseCommonInitialism(t *testing.T) {
 		{"single word", "id", "id", "id", "id", "ID"},
 		{"suffix", "userId", "user-id", "user_id", "userID", "UserID"},
 		{"prefix", "jsonSerializer", "json-serializer", "json_serializer", "jsonSerializer", "JSONSerializer"},
+		{"middle", "apiJSONSerializer", "api-json-serializer", "api_json_serializer", "apiJSONSerializer", "APIJSONSerializer"},
+		{"version", "userAPIV2", "user-api-v2", "user_api_v2", "userAPIV2", "UserAPIV2"},
+		{"number", "netHTTP2", "net-http-2", "net_http_2", "netHTTP2", "NetHTTP2"},
 	}
 
 	for _, test := range tests {

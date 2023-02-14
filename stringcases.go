@@ -1,8 +1,8 @@
 package stringcases
 
 import (
-	"fmt"
-	"regexp"
+	"errors"
+	"io"
 	"strings"
 	"unicode"
 
@@ -10,10 +10,10 @@ import (
 	"golang.org/x/text/language"
 )
 
-var commonRe = regexp.MustCompile(`(ACL|API|ASCII|CPU|CSS|DNS|EOF|GUID|HTML|HTTP|HTTPS|ID|IP|JSON|LHS|QPS|RAM|RHS|RPC|SLA|SMTP|SQL|SSH|TCP|TLS|TTL|UDP|UI|UID|URI|URL|UTF8|UUID|VM|XML|XMPP|XSRF|XSS)`)
-var repeatRe = regexp.MustCompile(`([^a-zA-Z]+)`)
-var camelRe = regexp.MustCompile(`([a-z][A-Z])`)
-var titleCaser = cases.Title(language.English, cases.NoLower)
+var (
+	titleCaser = cases.Title(language.English, cases.NoLower)
+	lowerCaser = cases.Lower(language.English)
+)
 
 // https://github.com/golang/lint/blob/6edffad5e6160f5949cdefc81710b2706fbcd4f6/lint.go#LL766-L809
 // commonInitialisms is a set of common initialisms.
@@ -61,76 +61,164 @@ var commonInitialisms = map[string]bool{
 }
 
 func ToSnake(s string) string {
-	// Tokenize the string, but keeping the common initialism.
-	s = commonRe.ReplaceAllStringFunc(s, func(s string) string {
-		return fmt.Sprintf("_%s_", strings.ToLower(s))
-	})
+	tokens := tokenize(s)
+	res := make([]string, len(tokens))
+	for i, token := range tokens {
+		res[i] = strings.ToLower(token)
+	}
 
-	// Splits aA to a_a.
-	s = camelRe.ReplaceAllStringFunc(s, func(s string) string {
-		return fmt.Sprintf("%s_%s", s[:1], strings.ToLower(s[1:]))
-	})
-	s = strings.ToLower(s)
+	return strings.Join(res, "_")
+}
 
-	var sb strings.Builder
-	defer sb.Reset()
+func ToKebab(s string) string {
+	tokens := tokenize(s)
+	res := make([]string, len(tokens))
+	for i, token := range tokens {
+		res[i] = strings.ToLower(token)
+	}
 
-	for i, r := range s {
-		if unicode.IsNumber(r) || unicode.IsLetter(r) {
-			sb.WriteRune(r)
+	return strings.Join(res, "-")
+}
+
+func ToCamel(s string) string {
+	tokens := tokenize(s)
+	res := make([]string, len(tokens))
+	for i, token := range tokens {
+		if i == 0 {
+			res[i] = lowerCaser.String(token)
+			continue
+		}
+
+		u := strings.ToUpper(token)
+		if commonInitialisms[u] {
+			res[i] = u
 		} else {
-			if i != 0 && i != len(s)-1 {
-				sb.WriteRune('_')
+			res[i] = titleCaser.String(token)
+		}
+	}
+
+	return strings.Join(res, "")
+}
+
+func ToPascal(s string) string {
+	tokens := tokenize(s)
+	res := make([]string, len(tokens))
+	for i, token := range tokens {
+		u := strings.ToUpper(token)
+		if commonInitialisms[u] {
+			res[i] = u
+		} else {
+			res[i] = titleCaser.String(token)
+		}
+	}
+
+	return strings.Join(res, "")
+}
+
+func tokenize(s string) []string {
+	var tokens []string
+
+	reader := strings.NewReader(s)
+	for {
+		r, _, err := reader.ReadRune()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+
+		switch {
+		case
+			unicode.IsNumber(r),
+			unicode.IsLower(r):
+			if err := reader.UnreadRune(); err != nil {
+				panic(err)
+			}
+
+			token := extractLower(reader)
+			tokens = append(tokens, string(token))
+		case unicode.IsUpper(r):
+			if err := reader.UnreadRune(); err != nil {
+				panic(err)
+			}
+
+			token := extractUpper(reader)
+			tokens = append(tokens, string(token))
+		default:
+		}
+	}
+
+	return tokens
+}
+
+func extractUpper(reader *strings.Reader) []rune {
+	var res []rune
+	var isProbablyCommonInitialism bool
+
+	for {
+		r, _, err := reader.ReadRune()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		switch {
+		case unicode.IsUpper(r):
+			// The first and second character is uppercase.
+			if len(res) == 1 {
+				isProbablyCommonInitialism = true
+			}
+
+			// Non-common initialism pattern breaks on the next uppercase rune.
+			if len(res) > 1 && !isProbablyCommonInitialism {
+				if err := reader.UnreadRune(); err != nil {
+					panic(err)
+				}
+
+				return res
+			}
+		case unicode.IsLower(r), unicode.IsNumber(r):
+			// Common initialism pattern breaks on the next lowercase rune.
+			if isProbablyCommonInitialism {
+				if err := reader.UnreadRune(); err != nil {
+					panic(err)
+				}
+
+				return res
+			}
+		default:
+			return res
+		}
+
+		res = append(res, r)
+		if len(res) >= 2 && len(res) <= 5 {
+			if commonInitialisms[string(res)] {
+				return res
 			}
 		}
 	}
 
-	s = repeatRe.ReplaceAllStringFunc(sb.String(), func(s string) string {
-		return s[:1]
-	})
-
-	return s
+	return res
 }
 
-func ToKebab(s string) string {
-	s = ToSnake(s)
+func extractLower(reader *strings.Reader) []rune {
+	var res []rune
 
-	return strings.ReplaceAll(s, "_", "-")
-}
+	for {
+		r, _, err := reader.ReadRune()
+		if errors.Is(err, io.EOF) {
+			break
+		}
 
-func ToPascal(s string) string {
-	s = ToSnake(s)
+		switch {
+		case unicode.IsUpper(r):
+			if err := reader.UnreadRune(); err != nil {
+				panic(err)
+			}
 
-	words := strings.Split(s, "_")
-	res := make([]string, len(words))
-	for i, word := range words {
-		if v := strings.ToUpper(word); commonInitialisms[v] {
-			res[i] = v
-		} else {
-			res[i] = titleCaser.String(word)
+			return res
+		case unicode.IsLower(r), unicode.IsNumber(r):
+			res = append(res, r)
+		default:
+			return res
 		}
 	}
 
-	return strings.Join(res, "")
-}
-
-func ToCamel(s string) string {
-	s = ToSnake(s)
-
-	words := strings.Split(s, "_")
-	res := make([]string, len(words))
-	for i, word := range words {
-		if i == 0 {
-			res[i] = word
-			continue
-		}
-
-		if v := strings.ToUpper(word); commonInitialisms[v] {
-			res[i] = v
-		} else {
-			res[i] = titleCaser.String(word)
-		}
-	}
-
-	return strings.Join(res, "")
+	return res
 }
