@@ -11,8 +11,11 @@ import (
 )
 
 var (
-	titleCaser = cases.Title(language.English, cases.NoLower)
-	lowerCaser = cases.Lower(language.English)
+	s        = New(language.English)
+	ToKebab  = s.ToKebab
+	ToCamel  = s.ToCamel
+	ToSnake  = s.ToSnake
+	ToPascal = s.ToPascal
 )
 
 // https://github.com/golang/lint/blob/6edffad5e6160f5949cdefc81710b2706fbcd4f6/lint.go#LL766-L809
@@ -60,55 +63,67 @@ var commonInitialisms = map[string]bool{
 	"XSS":   true,
 }
 
-func ToSnake(s string) string {
+type String struct {
+	uppercase, lowercase, titlecase cases.Caser
+}
+
+func New(t language.Tag) *String {
+	return &String{
+		titlecase: cases.Title(t, cases.NoLower),
+		lowercase: cases.Lower(t),
+		uppercase: cases.Upper(t),
+	}
+}
+
+func (str *String) ToSnake(s string) string {
 	tokens := tokenize(s)
 	res := make([]string, len(tokens))
 	for i, token := range tokens {
-		res[i] = strings.ToLower(token)
+		res[i] = str.lowercase.String(token)
 	}
 
 	return strings.Join(res, "_")
 }
 
-func ToKebab(s string) string {
+func (str *String) ToKebab(s string) string {
 	tokens := tokenize(s)
 	res := make([]string, len(tokens))
 	for i, token := range tokens {
-		res[i] = strings.ToLower(token)
+		res[i] = str.lowercase.String(token)
 	}
 
 	return strings.Join(res, "-")
 }
 
-func ToCamel(s string) string {
+func (str *String) ToCamel(s string) string {
 	tokens := tokenize(s)
 	res := make([]string, len(tokens))
 	for i, token := range tokens {
 		if i == 0 {
-			res[i] = lowerCaser.String(token)
+			res[i] = str.lowercase.String(token)
 			continue
 		}
 
-		u := strings.ToUpper(token)
+		u := str.uppercase.String(token)
 		if commonInitialisms[u] {
 			res[i] = u
 		} else {
-			res[i] = titleCaser.String(token)
+			res[i] = str.titlecase.String(token)
 		}
 	}
 
 	return strings.Join(res, "")
 }
 
-func ToPascal(s string) string {
+func (str *String) ToPascal(s string) string {
 	tokens := tokenize(s)
 	res := make([]string, len(tokens))
 	for i, token := range tokens {
-		u := strings.ToUpper(token)
+		u := str.uppercase.String(token)
 		if commonInitialisms[u] {
 			res[i] = u
 		} else {
-			res[i] = titleCaser.String(token)
+			res[i] = str.titlecase.String(token)
 		}
 	}
 
