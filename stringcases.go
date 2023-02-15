@@ -77,57 +77,57 @@ func New(t language.Tag) *String {
 
 func (str *String) ToSnake(s string) string {
 	tokens := tokenize(s)
-	res := make([]string, len(tokens))
+	runes := make([]string, len(tokens))
 	for i, token := range tokens {
-		res[i] = str.lowercase.String(token)
+		runes[i] = str.lowercase.String(token)
 	}
 
-	return strings.Join(res, "_")
+	return strings.Join(runes, "_")
 }
 
 func (str *String) ToKebab(s string) string {
 	tokens := tokenize(s)
-	res := make([]string, len(tokens))
+	runes := make([]string, len(tokens))
 	for i, token := range tokens {
-		res[i] = str.lowercase.String(token)
+		runes[i] = str.lowercase.String(token)
 	}
 
-	return strings.Join(res, "-")
+	return strings.Join(runes, "-")
 }
 
 func (str *String) ToCamel(s string) string {
 	tokens := tokenize(s)
-	res := make([]string, len(tokens))
+	runes := make([]string, len(tokens))
 	for i, token := range tokens {
 		if i == 0 {
-			res[i] = str.lowercase.String(token)
+			runes[i] = str.lowercase.String(token)
 			continue
 		}
 
 		u := str.uppercase.String(token)
 		if commonInitialisms[u] {
-			res[i] = u
+			runes[i] = u
 		} else {
-			res[i] = str.titlecase.String(token)
+			runes[i] = str.titlecase.String(token)
 		}
 	}
 
-	return strings.Join(res, "")
+	return strings.Join(runes, "")
 }
 
 func (str *String) ToPascal(s string) string {
 	tokens := tokenize(s)
-	res := make([]string, len(tokens))
+	runes := make([]string, len(tokens))
 	for i, token := range tokens {
 		u := str.uppercase.String(token)
 		if commonInitialisms[u] {
-			res[i] = u
+			runes[i] = u
 		} else {
-			res[i] = str.titlecase.String(token)
+			runes[i] = str.titlecase.String(token)
 		}
 	}
 
-	return strings.Join(res, "")
+	return strings.Join(runes, "")
 }
 
 func tokenize(s string) []string {
@@ -141,84 +141,101 @@ func tokenize(s string) []string {
 		}
 
 		switch {
-		case
-			unicode.IsNumber(r),
-			unicode.IsLower(r):
-			if err := reader.UnreadRune(); err != nil {
-				panic(err)
-			}
+		case unicode.IsNumber(r), unicode.IsLower(r):
+			token := extractLower(reader, []rune{r})
+			tokens = append(tokens, token)
 
-			token := extractLower(reader)
-			tokens = append(tokens, string(token))
 		case unicode.IsUpper(r):
-			if err := reader.UnreadRune(); err != nil {
-				panic(err)
-			}
+			token := extractUpper(reader, []rune{r})
+			tokens = append(tokens, token)
 
-			token := extractUpper(reader)
-			tokens = append(tokens, string(token))
 		default:
+			// Skip non-alphanumeric runes.
 		}
 	}
 
 	return tokens
 }
 
-func extractUpper(reader *strings.Reader) []rune {
-	var res []rune
-	var isProbablyCommonInitialism bool
-
+func extractUpper(reader *strings.Reader, runes []rune) string {
 	for {
 		r, _, err := reader.ReadRune()
 		if errors.Is(err, io.EOF) {
-			break
+			return string(runes)
 		}
+
 		switch {
 		case unicode.IsUpper(r):
-			// The first and second character is uppercase.
-			if len(res) == 1 {
-				isProbablyCommonInitialism = true
-			}
-
-			// Non-common initialism pattern breaks on the next uppercase rune.
-			if len(res) > 1 && !isProbablyCommonInitialism {
-				if err := reader.UnreadRune(); err != nil {
-					panic(err)
-				}
-
-				return res
-			}
+			// Continuous upper unicode indicates the possibility of common
+			// initialism word.
+			return extractCommonInitialism(reader, append(runes, r))
 		case unicode.IsLower(r), unicode.IsNumber(r):
-			// Common initialism pattern breaks on the next lowercase rune.
-			if isProbablyCommonInitialism {
-				if err := reader.UnreadRune(); err != nil {
-					panic(err)
-				}
-
-				return res
-			}
+			// Otherwise, it will be camel case word.
+			return extractCamel(reader, append(runes, r))
 		default:
-			return res
-		}
-
-		res = append(res, r)
-		if len(res) >= 2 && len(res) <= 5 {
-			if commonInitialisms[string(res)] {
-				return res
-			}
+			// Word breaks when it is non-alphanumeric.
+			return string(runes)
 		}
 	}
-
-	return res
 }
 
-func extractLower(reader *strings.Reader) []rune {
-	var res []rune
-
+func extractLower(reader *strings.Reader, runes []rune) string {
 	for {
 		r, _, err := reader.ReadRune()
 		if errors.Is(err, io.EOF) {
-			break
+			return string(runes)
+		}
+
+		switch {
+		case unicode.IsUpper(r):
+			// Word breaks when the next character is upper.
+			if err := reader.UnreadRune(); err != nil {
+				panic(err)
+			}
+
+			return string(runes)
+		case unicode.IsLower(r), unicode.IsNumber(r):
+			runes = append(runes, r)
+		default:
+			// Word breaks when it is non-alphanumeric.
+			return string(runes)
+		}
+	}
+}
+
+func extractCommonInitialism(reader *strings.Reader, runes []rune) string {
+	for {
+		r, _, err := reader.ReadRune()
+		if errors.Is(err, io.EOF) {
+			return string(runes)
+		}
+
+		switch {
+		case unicode.IsUpper(r):
+			runes = append(runes, r)
+			// Common initialism at present has length between 2 and 5.
+			if len(runes) >= 2 && len(runes) <= 5 {
+				if commonInitialisms[string(runes)] {
+					return string(runes)
+				}
+			}
+		// Common initialism pattern breaks at the next lower or number.
+		case unicode.IsLower(r), unicode.IsNumber(r):
+			if err := reader.UnreadRune(); err != nil {
+				panic(err)
+			}
+			return string(runes)
+		default:
+			return string(runes)
+		}
+	}
+}
+
+func extractCamel(reader *strings.Reader, runes []rune) string {
+	for {
+		r, _, err := reader.ReadRune()
+		if errors.Is(err, io.EOF) {
+			return string(runes)
 		}
 
 		switch {
@@ -227,13 +244,11 @@ func extractLower(reader *strings.Reader) []rune {
 				panic(err)
 			}
 
-			return res
+			return string(runes)
 		case unicode.IsLower(r), unicode.IsNumber(r):
-			res = append(res, r)
+			runes = append(runes, r)
 		default:
-			return res
+			return string(runes)
 		}
 	}
-
-	return res
 }
