@@ -69,7 +69,7 @@ type String struct {
 
 func New(t language.Tag) *String {
 	return &String{
-		titlecase: cases.Title(t, cases.NoLower),
+		titlecase: cases.Title(t),
 		lowercase: cases.Lower(t),
 		uppercase: cases.Upper(t),
 	}
